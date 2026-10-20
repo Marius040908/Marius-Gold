@@ -1,0 +1,30 @@
+name: Build Marius Gold AI DEMO
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', '.github/workflows/build.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore src/MariusGoldAI/MariusGoldAI.csproj
+      - name: Build cTrader package
+        run: dotnet build src/MariusGoldAI/MariusGoldAI.csproj --configuration Release --no-restore -p:AlgoPublish=false
+      - name: Show .algo files
+        run: find src/MariusGoldAI -name '*.algo' -type f -print
+      - name: Upload .algo
+        uses: actions/upload-artifact@v4
+        with:
+          name: MariusGoldAI-DEMO
+          path: src/MariusGoldAI/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
