@@ -30,11 +30,11 @@ namespace cAlgo.Robots
         [Parameter("Ethereum symbol", DefaultValue = "ETHUSD")]
         public string EthereumName { get; set; }
 
-        [Parameter("Daily loss limit (%)", DefaultValue = 5.0, MinValue = 5.0, MaxValue = 5.0)]
+        [Parameter("Daily loss limit (%)", DefaultValue = 3.0, MinValue = 3.0, MaxValue = 3.0)]
         public double DailyLossPercent { get; set; }
 
-        [Parameter("Daily profit stop (%)", DefaultValue = 10.0, MinValue = 10.0, MaxValue = 10.0)]
-        public double DailyProfitPercent { get; set; }
+        [Parameter("Monthly profit target (%)", DefaultValue = 10.0, MinValue = 10.0, MaxValue = 10.0)]
+        public double MonthlyProfitPercent { get; set; }
 
         [Parameter("Risk per position (%)", DefaultValue = 0.75, MinValue = 0.1, MaxValue = 1.0)]
         public double RiskPercent { get; set; }
@@ -117,12 +117,14 @@ namespace cAlgo.Robots
 
             Print("MULTI-ASSET DEMO START | account currency={0} | balance={1:F2} | equity={2:F2} | orders={3}",
                 Account.Asset.Name, Account.Balance, Account.Equity, EnableDemoOrders);
-            Print("ONE INSTANCE ONLY. No daily trade count cap. Daily loss -5%; daily profit target +10% of UTC starting balance (NO fixed 10-unit cap).");
+            Print("ONE INSTANCE ONLY. Unlimited daily trade count. DAILY LOSS STOP -3%; MONTHLY PROFIT TARGET +10%.");
+            Print("Adaptive DAILY profit stop = remaining month gap distributed over remaining UTC calendar days via compounding; NEVER increases position risk.");
             Print("Auto-symbol detection enabled. DEMO orders default ON; select demo account only.");
             Print("ADAPTIVE DEMO v2: M15 trend + M5 entry; independently checks last 12 closed trades for each market and direction.");
             Print("Learns by increasing selectivity and REDUCING risk after >=8 losses AND negative net profit in last 12 completed positions.");
-            Print("This is statistical rule adaptation, NOT machine-learning AI. Nothing guarantees +10% daily.");
+            Print("This is statistical rule adaptation, NOT machine-learning AI. No monthly or daily profit is guaranteed.");
             Print("WARNING: demo cloud does not persist local storage across restarts. Use a dedicated account; no deposits/other trades.");
+            PrintMonthlyPlan();
             Timer.Start(10);
             OnTimer();
         }
@@ -213,7 +215,8 @@ namespace cAlgo.Robots
                 _day = Server.Time.Date;
                 _halted = false;
                 _reason = "";
-                Print("NEW UTC DAY {0:yyyy-MM-dd}. Recheck accumulated daily history.", _day);
+                Print("NEW UTC DAY {0:yyyy-MM-dd}. Recheck accumulated daily/monthly history.", _day);
+                PrintMonthlyPlan();
             }
 
             CheckDailyStops();
@@ -275,29 +278,95 @@ namespace cAlgo.Robots
             return Account.Balance - closed;
         }
 
+        private double MonthClosedPnl()
+        {
+            var firstOfMonth = new DateTime(Server.Time.Year, Server.Time.Month, 1);
+            return History.FindAll(BotLabel)
+                .Where(t => t.ClosingTime >= firstOfMonth && t.ClosingTime <= Server.Time)
+                .Sum(t => t.NetProfit);
+        }
+
+        private double MonthStartingBalance()
+        {
+            // Reconstruct from BROKER HISTORY; assumes this bot owns a dedicated demo account.
+            // No manual trades, deposits, withdrawals, other bots or overnight positions.
+            return Account.Balance - MonthClosedPnl();
+        }
+
+        private int RemainingCalendarDays()
+        {
+            var utc = Server.Time;
+            return DateTime.DaysInMonth(utc.Year, utc.Month) - utc.Day + 1;
+        }
+
+        private double DynamicDailyProfitGoal(double monthStart, double dayStart)
+        {
+            // Exact compounding gap formula, including today:
+            // dailyFactor = (monthlyTargetEquity / today's starting balance)^(1 / daysLeft)
+            // Example: full 30-day month -> ~0.318% each day for 10% total.
+            double target = monthStart * (1.0 + MonthlyProfitPercent / 100.0);
+            if (!Finite(target) || !Finite(dayStart) || dayStart <= 0 || target <= dayStart)
+                return 0.0;
+            return dayStart * (Math.Pow(target / dayStart, 1.0 / RemainingCalendarDays()) - 1.0);
+        }
+
+        private void PrintMonthlyPlan()
+        {
+            double monthStart = MonthStartingBalance();
+            double dayStart = TodayStartingBalance();
+            if (!Finite(monthStart) || !Finite(dayStart) || monthStart <= 0 || dayStart <= 0)
+            {
+                Print("PLAN UNAVAILABLE: invalid reconstructed starting balance.");
+                return;
+            }
+
+            double monthTarget = monthStart * (1.0 + MonthlyProfitPercent / 100.0);
+            double dayGoal = DynamicDailyProfitGoal(monthStart, dayStart);
+            Print("MONTH PLAN: month start~{0:F2}; target +{1:F1}% => {2:F2}; equity={3:F2} {4}; remaining UTC days={5}; DAILY PROFIT TARGET~{6:F2} ({7:F3}%) vs DAY START {8:F2}; DAILY LOSS LIMIT -{9:F1}% (~{10:F2}).",
+                monthStart, MonthlyProfitPercent, monthTarget, Account.Equity, Account.Asset.Name,
+                RemainingCalendarDays(), dayGoal, dayStart > 0 ? 100.0 * dayGoal / dayStart : 0,
+                dayStart, DailyLossPercent, dayStart * DailyLossPercent / 100.0);
+        }
+
         private void CheckDailyStops()
         {
-            double start = TodayStartingBalance();
+            // A halt lasts until next UTC day; monthly target is independently checked daily.
+            if (_halted)
+                return;
+
+            double dayStart = TodayStartingBalance();
+            double monthStart = MonthStartingBalance();
             double pnl = TodayNetPnl();
-            if (!Finite(start) || start <= 0 || !Finite(pnl))
+            double equity = Account.Equity;
+            double goal = DynamicDailyProfitGoal(monthStart, dayStart);
+            double monthlyTarget = monthStart * (1.0 + MonthlyProfitPercent / 100.0);
+
+            if (!Finite(dayStart) || !Finite(monthStart) || !Finite(pnl) ||
+                !Finite(equity) || !Finite(goal) ||
+                dayStart <= 0 || monthStart <= 0)
             {
                 _halted = true;
-                _reason = "Invalid account/history data";
+                _reason = "Invalid account or history data";
             }
-            else if (pnl <= -start * DailyLossPercent / 100.0)
+            else if (pnl <= -dayStart * DailyLossPercent / 100.0)
             {
                 _halted = true;
-                _reason = "DAILY LOSS -5% triggered";
+                _reason = "DAILY LOSS LIMIT -3% triggered";
             }
-            else if (pnl >= start * DailyProfitPercent / 100.0)
+            else if (equity >= monthlyTarget)
             {
                 _halted = true;
-                _reason = "DAILY PROFIT +10% target reached";
+                _reason = "MONTHLY PROFIT TARGET +10% reached";
+            }
+            else if (goal > 0 && pnl >= goal)
+            {
+                _halted = true;
+                _reason = "Dynamic daily profit target reached";
             }
 
             if (_halted)
-                Print("HALT {0} | start ~{1:F2} | net P&L {2:F2} | deposit currency={3}",
-                    _reason, start, pnl, Account.Asset.Name);
+                Print("HALT {0} | daily start~{1:F2} | today's net P&L~{2:F2} | month start~{3:F2} | month equity~{4:F2} | monthly goal~{5:F2} | {6}.",
+                    _reason, dayStart, pnl, monthStart, equity, monthlyTarget, Account.Asset.Name);
         }
 
         // History is broker-side; the last N closed positions are reconstructed after cloud restarts.
@@ -459,7 +528,7 @@ namespace cAlgo.Robots
                 double pipsAtStop = Math.Abs(p.EntryPrice - p.StopLoss.Value) / sym.PipSize;
                 openRisk += sym.AmountRisked(p.VolumeInUnits, pipsAtStop);
             }
-            double portfolioBudget = Math.Max(0, start * 0.035 - openRisk);
+            double portfolioBudget = Math.Max(0, start * 0.015 - openRisk);
             positionBudget = Math.Min(positionBudget, portfolioBudget);
 
             if (positionBudget <= 0)
