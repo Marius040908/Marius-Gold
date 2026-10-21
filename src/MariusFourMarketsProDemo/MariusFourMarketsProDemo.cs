@@ -250,9 +250,8 @@ namespace cAlgo.Robots
             double net = recent.Sum(x => x.Net);
             // At least 12 positions AND >= two thirds losers AND negative net performance.
             // The system only becomes more cautious: it does NOT search for bigger lots.
-            bool defensive = recent.Length >= MinLearningTrades &&
-                             losers * 3 >= MinLearningTrades * 2 &&
-                             net < 0;
+            bool defensive = MariusProRiskMath.Defensive(
+                recent.Length, MinLearningTrades, losers, net);
 
             return new LearningSnapshot
             {
@@ -432,9 +431,8 @@ namespace cAlgo.Robots
             }
             // Repeated poor results trigger HALF-RISK mode, never revenge trading.
             double learningRiskFactor = selectedLearning.Defensive ? 0.5 : 1.0;
-            double positionBudget = Math.Min(
-                accountEquity * riskTierPercent / 100.0 * learningRiskFactor,
-                Math.Max(0, totalRiskLimit - openRisk));
+            double positionBudget = MariusProRiskMath.NewPositionRiskBudget(
+                accountEquity, riskTierPercent, learningRiskFactor, openRisk);
 
             if (!Finite(positionBudget) || positionBudget <= 0)
             {
@@ -480,7 +478,8 @@ namespace cAlgo.Robots
             // 3% of opening account equity, independent of rounded volume.
             // Net realized gains may be smaller due to commissions, spread, slippage and FX.
             double targetAmount = accountEquity * 0.03;
-            double takePips = stopPips * (targetAmount / estimatedRisk);
+            double takePips = MariusProRiskMath.TargetPips(
+                stopPips, estimatedRisk, accountEquity, 3.0);
             if (!Finite(takePips) || takePips <= 0 || takePips > 1000000)
             {
                 Print("SKIP {0}: invalid 3% equity profit target in pips.", m.Symbol.Name);
