@@ -1,0 +1,29 @@
+name: Build Marius MultiAsset DEMO
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/MariusMultiAssetDemo/**'
+      - '.github/workflows/multiasset-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore dependencies
+        run: dotnet restore src/MariusMultiAssetDemo/MariusMultiAssetDemo.csproj
+      - name: Compile cBot and create .algo
+        run: dotnet build src/MariusMultiAssetDemo/MariusMultiAssetDemo.csproj -c Release --no-restore -p:AlgoPublish=false
+      - name: Upload .algo (FAIL if missing)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MariusMultiAssetDemo-algo
+          path: src/MariusMultiAssetDemo/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
