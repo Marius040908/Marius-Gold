@@ -1,0 +1,21 @@
+name: Test Offline Time Machine
+on:
+  push:
+    branches: [main, feature/unified-daytrader-demo-v2]
+    paths:
+      - 'research/time_machine.py'
+      - 'research/test_time_machine.py'
+      - '.github/workflows/unified-research-test.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Deterministic replay tests
+        run: python -m unittest discover -s research -p 'test_*.py' -v
