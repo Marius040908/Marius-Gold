@@ -33,7 +33,7 @@ namespace cAlgo.Robots
         [Parameter("Risk per trade (%)", DefaultValue = 1.0, MinValue = 1.0, MaxValue = 1.0)]
         public double RiskPercent { get; set; }
 
-        [Parameter("Max simultaneous positions", DefaultValue = 4, MinValue = 1, MaxValue = 4)]
+        [Parameter("Max simultaneous positions", DefaultValue = 2, MinValue = 2, MaxValue = 2)]
         public int MaxOpenPositions { get; set; }
 
         [Parameter("UTC session starts", DefaultValue = 7, MinValue = 0, MaxValue = 22)]
@@ -108,14 +108,14 @@ namespace cAlgo.Robots
 
             Print("MULTI-ASSET DEMO START | account currency={0} | balance={1:F2} | equity={2:F2} | orders={3}",
                 Account.Asset.Name, Account.Balance, Account.Equity, EnableDemoOrders);
-            Print("RR13 DEMO | PER TRADE SL RISK <= 1% OF ACCOUNT EQUITY | INITIAL TP AT 3x SL DISTANCE (TARGET ~3% EQUITY IF FULL RISK IS USABLE).");
-            Print("NO DAILY OR MONTHLY PROFIT/LOSS HALTS, NO DAILY TRADE COUNT LIMIT; max 4 simultaneous positions (one per market).");
-            Print("MAX COMBINED ESTIMATED OPEN-STOP RISK 4% OF EQUITY; real losses can be larger with gaps, spread and slippage.");
-            Print("On favorable price moves the bot may trail SL or close early on a confirmed M15 trend reversal; TP is retained on SL modifications.");
+            Print("FLEX DEMO: NO FIXED TP; winners can run beyond 3R/10R. 1% is MAX ESTIMATED RISK PER POSITION, not required risk.");
+            Print("SIGNAL STRENGTH picks 0.25%, 0.50%, 0.75% or max 1.00% equity risk; DEFENSIVE halves this budget.");
+            Print("NO DAILY/MONTHLY PROFIT OR LOSS STOPS AND NO DAILY TRADE COUNT LIMIT; MAX TWO concurrent positions.");
+            Print("COMBINED ESTIMATED OPEN-STOP RISK <=2% account equity; slippage/fees/gaps may exceed.");
             Print("Auto-symbol detection enabled. DEMO orders default ON; select demo account only.");
             Print("ADAPTIVE DEMO v2: M15 trend + M5 entry; independently checks last 12 closed trades for each market and direction.");
             Print("Learns by increasing selectivity and REDUCING risk after >=8 losses AND negative net profit in last 12 completed positions.");
-            Print("Statistical learning, NOT machine-learning AI. 1:3 is a target, not a win-rate or profit guarantee.");
+            Print("Statistical rule adaptation, NOT machine-learning AI. NO GUARANTEED PROFIT OR 10% TRADE RETURN.");
             Print("WARNING: demo cloud does not persist local storage across restarts. Use a dedicated account; no deposits/other trades.");
             Timer.Start(10);
             OnTimer();
@@ -367,16 +367,33 @@ namespace cAlgo.Robots
                 return;
             }
 
-            // 1:3 profit-to-risk setting: protective SL ~1% account equity and
-            // broker-hosted TP at 3x initial SL distance. Both are approximate.
+            // Initial broker-hosted protective SL. No fixed TP:
+            // trailing stop and confirmed M15 reversals manage winners.
             double stopPips = Math.Max(1.5 * atr / m.Symbol.PipSize, Math.Max(3 * spreadPips, 2));
-            double takePips = stopPips * 3.0;
+
+            // Four conservative, deterministic SIGNAL-STRENGTH risk tiers.
+            // These are UNVALIDATED heuristics, not a profit-probability model:
+            // 0.25% when no extra confirmations, up to max 1.00% for 3+ checks.
+            double m15Atr = ComputeAtr(m.TrendBars, 14);
+            if (!Finite(m15Atr) || m15Atr <= 0)
+                return;
+            int strength = 0;
+            if (Math.Abs(trendFast - trendSlow) >= 0.20 * m15Atr)
+                strength++;
+            if (Math.Abs(fast - slow) >= 0.08 * atr)
+                strength++;
+            if (direction == TradeType.Buy ? (rsi >= 55 && rsi <= 65)
+                                           : (rsi >= 35 && rsi <= 45))
+                strength++;
+            if (spread <= atr * 0.06)
+                strength++;
+            double riskTierPercent = Math.Min(RiskPercent, 0.25 + 0.25 * strength);
 
             var existing = BotPositions();
-            // 1% max for each trade, 4% maximum combined open-to-stop exposure.
-            // As current account equity changes, new risk budgets adapt.
+            // At most TWO trades concurrently, each up to 1% of equity:
+            // max estimated open-stop downside exposure 2% of equity.
             double accountEquity = Account.Equity;
-            double totalRiskLimit = accountEquity * 0.04;
+            double totalRiskLimit = accountEquity * 0.02;
             double openRisk = 0.0;
             foreach (var p in existing)
             {
@@ -399,11 +416,10 @@ namespace cAlgo.Robots
                 }
                 openRisk += risk;
             }
-            // A string of bad outcomes triggers HALF-risk mode; it does not
-            // increase risk to recover losses or override the 1% ceiling.
+            // Repeated poor results trigger HALF-RISK mode, never revenge trading.
             double learningRiskFactor = selectedLearning.Defensive ? 0.5 : 1.0;
             double positionBudget = Math.Min(
-                accountEquity * RiskPercent / 100.0 * learningRiskFactor,
+                accountEquity * riskTierPercent / 100.0 * learningRiskFactor,
                 Math.Max(0, totalRiskLimit - openRisk));
 
             if (!Finite(positionBudget) || positionBudget <= 0)
@@ -412,9 +428,9 @@ namespace cAlgo.Robots
                     m.Symbol.Name, openRisk, totalRiskLimit, Account.Asset.Name);
                 return;
             }
-            Print("RISK ALLOCATION {0}: existing={1}, single-trade max risk~{2:F2}, open-stop risk~{3:F2}, available new risk~{4:F2}, portfolio cap~{5:F2} {6}.",
-                m.Symbol.Name, existing.Length, accountEquity*RiskPercent/100.0,
-                openRisk, positionBudget, totalRiskLimit, Account.Asset.Name);
+            Print("RISK ALLOCATION {0}: existing={1}/2, strength={2}/4, base tier={3:F2}% (max 1%); defensive={4}, risk budget~{5:F2}, open stop risk~{6:F2}, portfolio cap~{7:F2} {8}.",
+                m.Symbol.Name, existing.Length, strength, riskTierPercent,
+                selectedLearning.Defensive, positionBudget, openRisk, totalRiskLimit, Account.Asset.Name);
 
             double minVol = m.Symbol.VolumeInUnitsMin;
             double minRisk = m.Symbol.AmountRisked(minVol, stopPips);
@@ -447,9 +463,9 @@ namespace cAlgo.Robots
                 return;
             }
 
-            Print("SIGNAL {0} {1} | M15 trend confirmed | adaptive defense={2} | RSI={3:F1} | units={4} (~{5:F5} lots) | estimated risk~{6:F2} | target~{7:F2} in account currency before costs | margin~{8:F2} | SL {9:F1}p TP {10:F1}p (3R).",
-                m.Symbol.Name, direction, selectedLearning.Defensive, rsi, units,
-                units / m.Symbol.LotSize, estimatedRisk, estimatedRisk * 3.0, margin, stopPips, takePips);
+            Print("SIGNAL {0} {1} | M15 confirmed, strength={2}/4, defensive={3}, RSI={4:F1}, units={5} (~{6:F5} lots), planned SL risk~{7:F2}, margin~{8:F2}, SL={9:F1} pips, TP=NONE (adaptive trailing runner).",
+                m.Symbol.Name, direction, strength, selectedLearning.Defensive, rsi,
+                units, units / m.Symbol.LotSize, estimatedRisk, margin, stopPips);
 
             if (!EnableDemoOrders)
             {
@@ -461,7 +477,7 @@ namespace cAlgo.Robots
                 !m.Symbol.MarketHours.IsOpened() || BotPositions().Any(p => p.SymbolName == m.Symbol.Name))
                 return;
 
-            var result = ExecuteMarketOrder(direction, m.Symbol.Name, units, BotLabel, stopPips, takePips);
+            var result = ExecuteMarketOrder(direction, m.Symbol.Name, units, BotLabel, stopPips, null);
             if (result.IsSuccessful)
                 Print("DEMO ORDER OPENED {0}, position id {1}", m.Symbol.Name, result.Position.Id);
             else
@@ -469,7 +485,7 @@ namespace cAlgo.Robots
                     m.Symbol.Name, result.Error, margin, Account.FreeMargin);
         }
 
-        // Protective trailing can close before the 3R TP; it never moves TP or loosens SL.
+        // No fixed TP: trailing protects open profits; SL only tightens, never loosens.
         // Adaptive profit-taking on each 10-second timer tick.
         // Requires this cBot instance to keep running: the broker SL protects a trade
         // between ticks, but discretionary trend exits / future SL updates are not server-side.
@@ -555,7 +571,7 @@ namespace cAlgo.Robots
                 if (!Finite(candidate) || !insideMarket || !tightens)
                     continue;
 
-                var modification = ModifyPosition(position, candidate, position.TakeProfit, ProtectionType.Absolute);
+                var modification = ModifyPosition(position, candidate, null, ProtectionType.Absolute);
                 if (modification.IsSuccessful)
                     Print("TRAIL {0} pos={1} | old SL={2:F5} -> new SL={3:F5} | floating net={4:F2} {5} | ATR={6:F5} | aligned trend={7}.",
                         symbol.Name, position.Id, oldStop, candidate, position.NetProfit,
