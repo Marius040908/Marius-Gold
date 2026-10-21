@@ -15,7 +15,7 @@ namespace cAlgo.Robots
     {
         private const string BotLabel = "MARIUS_MULTI_DEMO_V1";
 
-        [Parameter("Enable DEMO orders", DefaultValue = false)]
+        [Parameter("Enable DEMO orders", DefaultValue = true)]
         public bool EnableDemoOrders { get; set; }
 
         [Parameter("Gold symbol", DefaultValue = "XAUUSD")]
@@ -105,10 +105,38 @@ namespace cAlgo.Robots
             Print("MULTI-ASSET DEMO START | account currency={0} | balance={1:F2} | equity={2:F2} | orders={3}",
                 Account.Asset.Name, Account.Balance, Account.Equity, EnableDemoOrders);
             Print("ONE INSTANCE ONLY. No daily trade count cap. Daily loss -5%; daily profit +10 account currency units or +10%, whichever comes first.");
+            Print("Auto-symbol detection enabled. DEMO orders default ON; select demo account only.");
             Print("NO GUARANTEED RETURNS. NO SELF-LEARNING AI. All four markets share ONE profit/loss limit.");
             Print("WARNING: demo cloud does not persist local storage across restarts. Use a dedicated account; no deposits/other trades.");
             Timer.Start(10);
             OnTimer();
+        }
+
+        private Symbol ResolveBrokerSymbol(string requested)
+        {
+            var exact = Symbols.GetSymbol(requested);
+            if (exact != null)
+                return exact;
+
+            // Do not infer entirely different instruments from descriptions or aliases.
+            var candidates = new List<string>();
+            for (int i = 0; i < Symbols.Count; i++)
+            {
+                string available = Symbols[i];
+                if (available.StartsWith(requested, StringComparison.OrdinalIgnoreCase)
+                    && available.Length > requested.Length)
+                    candidates.Add(available);
+            }
+            if (candidates.Count == 1)
+            {
+                var selected = Symbols.GetSymbol(candidates[0]);
+                Print("AUTO SYMBOL {0} -> {1} (unique available suffix match).", requested, selected.Name);
+                return selected;
+            }
+            if (candidates.Count > 1)
+                Print("AMBIGUOUS {0}: candidates = {1}. Supply exact name once.",
+                    requested, string.Join(", ", candidates));
+            return null;
         }
 
         private void AddMarket(string name, bool crypto)
@@ -122,10 +150,12 @@ namespace cAlgo.Robots
                 return;
             }
 
-            var symbol = Symbols.GetSymbol(name);
+            // Automatically resolve broker suffixes (e.g. XAUUSD.c) when the match is unique.
+            // An exact configured name wins. Multiple fallback candidates -> never guess.
+            var symbol = ResolveBrokerSymbol(name);
             if (symbol == null)
             {
-                Print("MISSING SYMBOL {0}: open Pepperstone watchlist and enter exact symbol name in bot parameters.", name);
+                Print("MISSING/AMBIGUOUS SYMBOL {0}: no safe match. Choose exact broker symbol in parameters.", name);
                 return;
             }
 
