@@ -5,11 +5,11 @@
 ## Analyse
 - **M15 (15 Minuten)**: abgeschlossene Kerze und EMA20/EMA50 bestimmen die übergeordnete Trendrichtung.
 - **M5 (5 Minuten)**: EMA9/EMA21 und RSI14 bestimmen eine mögliche Long- oder Short-Einstiegsgelegenheit; ATR bestimmt den Stop-Loss.
-- Kein Tageslimit für die Trade-Anzahl, aber maximal zwei gleichzeitig offene Positionen.
+- **Keine Begrenzung der Trade-Anzahl pro Tag. Bis zu vier gleichzeitige Positionen**, maximal eine je Gold, Silber, Bitcoin und Ethereum. Vier Positionen sind eine Obergrenze, kein verpflichtendes Handelsvolumen.
 - Positionen nur, wenn Mindestlot, geschätztes Verlustbudget, Margin, Spread, Handelszeit und aktuelle Kontoexposition passen.
 - **Neuer Plan: Monatsgewinnziel +10 %**, maximal **3 % Tagesverlust** vom rekonstruierten UTC-Tagesstartkapital. Das 10-%-Tagesziel ist vollständig entfernt.
-- **Dynamisches Tagesgewinnziel**: Zu jedem UTC-Tagesstart wird die Differenz zum Monatsziel auf die restlichen Kalendertage verteilt (Zinseszinseffekt). Beispiel: 2.000 EUR am Monatsanfang, 30 Kalendertage: monatlich +200 EUR, rechnerisch täglich ca. +0,318 %. Sobald das jeweilige Tagesziel erreicht wird, pausiert der Bot bis zum nächsten UTC-Tag; sobald der Monatswert erreicht wird, pausiert er für den restlichen UTC-Monat.
-- **Keine Verlustjagd**: Schlechtere Monatsentwicklung kann das berechnete Tagesziel erhöhen, jedoch niemals das Risiko oder den Hebel. Offene Bot-Positionen werden auf maximal 1,5 % geschätztes gemeinsames SL-Risiko begrenzt. Bei fehlendem Signal handeln wir nicht.
+- **Kein tägliches Gewinnlimit**: Der Bot berechnet die rechnerisch nötige Tagesrendite für +10 % bis zum Monatsende (etwa +0,318 % bei 30 Tagen) **nur als Orientierung im Journal**. Er handelt bei guten Signalen weiter, auch wenn dieser Richtwert überschritten ist. Sobald das Monatsziel erreicht wird, versucht er seine Positionen zu schließen und bis zum nächsten UTC-Monat zu pausieren.
+- **Keine Verlustjagd**: Wenn der Bot hinter seinem Monatsziel liegt, erhöht er nicht das Risiko oder den Hebel. Neue Positionen dürfen standardmäßig höchstens **0,50 %** des aktuellen Kontoeigenkapitals als geschätztes SL-Risiko tragen; alle offenen Bot-Positionen zusammen maximal **2 % des rekonstruierten Tagesstartkapitals** als geschätztes SL-Risiko. Mindestlot, Margin, Signal und verfügbare Risikobudgets können weniger als vier Positionen erlauben.
 
 ## Lernmechanismus nach mehreren Fehlern
 - Bewertet für **jeden Markt und jede Richtung getrennt** die letzten **12 abgeschlossenen Positionen** dieses Bots aus dem cTrader-Handelsverlauf.
@@ -21,6 +21,11 @@
 - Die Lernbasis liegt in der **cTrader-Handelshistorie**, nicht im Cloud-Dateispeicher. Nach Neustart wird aus dem Brokerverlauf rekonstruiert, soweit die Historie vollständig verfügbar ist.
 - Learning-Journal-Meldungen zeigen Samplezahl, Nettoergebnis, Verlustanzahl und NORMAL/DEFENSIVE, damit die Anpassung überprüfbar ist.
 
+## Verhalten am Monatsende
+- Gewinnziel: +10 % des anhand der Bot-Historie rekonstruierten Monatsstartkapitals. Erreicht die Equity das Monatsziel, hält der Bot die restlichen Tage dieses Monats an (soweit die Cloud-Instanz läuft).
+- Nach einem normalen Cloud-Neustart versucht er eine zuvor erreichte **realisierte** Monatszielmarke aus der Handelshistorie zu rekonstruieren. War die +10-%-Schwelle nur kurz in schwebenden Gewinnen erreicht und endete das Schließen darunter, kann der Monatsstopp nach einem Neustart nicht zuverlässig rekonstruiert werden. Kontrolliere deshalb die Demo-Statistiken; kein garantiert durchgängiger Schutz.
+- Zum UTC-Monatswechsel wird die Monatsziel-Sperre zurückgesetzt, während ein Tagesverluststopp jeden UTC-Tag neu bewertet wird.
+
 ## Installation auf dem iPad
 1. GitHub Actions "Build Marius Adaptive DEMO v2" abwarten (grüner Status).
 2. Aus dem Artefakt `MariusAdaptiveDemo-v2` die `.algo`-Datei herunterladen.
@@ -28,7 +33,7 @@
 4. **Alten Bot stoppen**, offene Demo-Positionen überprüfen und bei Bedarf separat schließen. Der alte Bot wurde nicht überschrieben.
 5. Neuen Bot `MariusAdaptiveDemo` mit nur **einer** Cloud-Instanz im **Demokonto** starten.
 6. Im Journal auf `M15trend`, `LEARNING ... NORMAL`, `LEARNING ... DEFENSIVE`, `SIGNAL`, `MIN LOT NOT AFFORDABLE`, `DEMO ORDER OPENED` achten.
-7. Den Bot mindestens mehrere Wochen vor einem Urteil testen. Erst nach 12 **geschlossenen** Positionen eines Markts in derselben Richtung kann eine defensive Anpassung einsetzen.
+7. Die neue Version nach erfolgreichem Build **neu importieren**, den alten Demobot vorher stoppen und offene Positionen kontrollieren. Prüfe im neuen Journal `NO daily profit stop`, `UP TO FOUR` und `MONTH PLAN`. Den Bot mindestens mehrere Wochen vor einem Urteil testen. Erst nach 12 **geschlossenen** Positionen eines Markts in derselben Richtung kann eine defensive Anpassung einsetzen.
 
 ## Grenzen
 - Kein laufender ChatGPT-Liveanschluss, kein automatischer KI-Nachrichtenimport, keine selbsttätige Optimierung von frei wählbaren Hyperparametern.
