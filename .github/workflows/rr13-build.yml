@@ -1,0 +1,29 @@
+name: Build Marius RR13 DEMO
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/MariusRR13Demo/**'
+      - '.github/workflows/rr13-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore src/MariusRR13Demo/MariusRR13Demo.csproj
+      - name: Compile .algo
+        run: dotnet build src/MariusRR13Demo/MariusRR13Demo.csproj --configuration Release --no-restore -p:AlgoPublish=false
+      - name: Upload .algo
+        uses: actions/upload-artifact@v4
+        with:
+          name: MariusRR13Demo-algo
+          path: src/MariusRR13Demo/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
