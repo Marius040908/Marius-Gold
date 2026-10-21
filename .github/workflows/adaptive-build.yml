@@ -1,0 +1,29 @@
+name: Build Marius Adaptive DEMO v2
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/MariusAdaptiveDemo/**'
+      - '.github/workflows/adaptive-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore src/MariusAdaptiveDemo/MariusAdaptiveDemo.csproj
+      - name: Compile .algo
+        run: dotnet build src/MariusAdaptiveDemo/MariusAdaptiveDemo.csproj --configuration Release --no-restore -p:AlgoPublish=false
+      - name: Upload .algo
+        uses: actions/upload-artifact@v4
+        with:
+          name: MariusAdaptiveDemo-v2
+          path: src/MariusAdaptiveDemo/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
