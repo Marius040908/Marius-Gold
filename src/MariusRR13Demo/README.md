@@ -1,27 +1,31 @@
-# Marius RR13 DEMO – 1% Maximalrisiko / 3% angestrebter Gewinn pro Trade
+# Marius RR13 DEMO – Flexible Risikosteuerung, maximal zwei Positionen
 
-Eine **separate experimentelle cTrader-DEMO-Strategie**, nicht das bisherige adaptive Monatsziel-Modell. Kein Echtgeldhandel: `Account.IsLive` stoppt den cBot.
+Eigenständiger experimenteller cTrader-cBot für das **Demokonto**. `Account.IsLive` blockiert Echtgeldhandel. Der alte adaptive Monatsziel-Bot bleibt unverändert.
 
-## Genaue Regeln
+## Regeln
+- **Maximal zwei offene Positionen gleichzeitig**, höchstens eine je Gold (XAUUSD), Silber (XAGUSD), Bitcoin (BTCUSD), Ethereum (ETHUSD).
+- **Keine feste Obergrenze für Trades pro Tag.** Signale entstehen beim Abschluss von M5-Kerzen. Nur gültige Signale werden gehandelt; es gibt keine erzwungenen Einstiege.
+- **1 % der aktuellen Kontoequity ist die absolute geschätzte Obergrenze je neuem Trade**, nicht das vorgeschriebene Risiko. Bei ca. 2.000 EUR Kontowert maximal ca. 20 EUR geplantes Kursrisiko pro Position; nach Gebühren, Slippage und Kurslücken kann mehr verloren gehen.
+- **Signalabhängige Risikostufen:** Der Bot prüft 4 zusätzliche Kriterien (M15-Trendstärke, M5-Trendabstand, günstiger RSI-Bereich, geringer Spread relativ zur M5-Volatilität). Je nach Anzahl ergibt sich **0,25 %, 0,50 %, 0,75 % oder höchstens 1 %** neues Positionsrisiko. Dies sind experimentelle Heuristiken, **keine nachgewiesenen Gewinnwahrscheinlichkeiten**.
+- **Lernen nach mehreren Verlusten:** Separat je Markt und Kauf-/Verkaufsrichtung werden die letzten 12 abgeschlossenen Positionen gewertet. Nach mindestens 8 Verlusten **und negativem Gesamtergebnis** halbiert der Bot die Positionseinsatzgrenze für weitere Trades und verschärft die Einstiegskriterien. Keine Anpassung nach einem einzelnen Verlust.
+- **Maximal 2 % gemeinsames geplantes Stop-Loss-Risiko** aller laufenden Bot-Positionen, gemessen am aktuellen Kontoeigenkapital. Keine automatische Verlustaufstockung nach schlechten Trades.
+- **Kein festes Take-Profit-Limit mehr.** Ein Trade kann bei günstiger Entwicklung über 3 % oder auch 10 % Kontorendite erzielen; **weder das Erreichen noch eine solche Rendite ist wahrscheinlichkeitsbewertet oder garantiert**. 15, 25 und 40 EUR Floating-Profit werden lediglich im Journal protokolliert.
+- **Dynamische Gewinnsicherung:** ATR-basierter Stop-Loss beim Öffnen. Ab ausreichender positiver Bewegung wird dieser Stop-Loss schrittweise nachgezogen. Eine bestätigte Umkehr des M15-Trends kann einen früheren Ausstieg auslösen. Stop-Loss niemals absichtlich verschlechtern.
+- **Keine Tages- oder Monatsgewinnziele/-stopps**. Eine Serie vieler Verlusttrades kann einen erheblichen Tages- oder Monatsverlust verursachen. Das ist eine risikoreiche Strategie, ausschließlich für einen separaten Demotest.
+- Handelsfenster standardmäßig 7–21 Uhr UTC, am Wochenende nur Kryptowährungen, soweit tatsächlich verfügbar. Nach der Sitzung versucht der Bot, seine Positionen zu schließen.
 
-- Kapitalbezogen: Bei **2.000 EUR Equity** riskiert eine neue Position per Stop-Loss maximal **etwa 20 EUR = 1%** vor Slippage und möglichen Gebühren.
-- Der **Take-Profit liegt 3x so weit entfernt wie der Stop-Loss (3R)**; bei tatsächlich 20 EUR initialem Kursrisiko entspricht das **etwa 60 EUR Bruttoziel bzw. 3% der Equity**, vor Gebühren/Abweichungen.
-- Wegen Lotgrößenrundung, Broker-Mindestpositionen, Spread, Kommissionen und Margin kann der tatsächliche Einsatz deutlich unter 1% liegen und das absolute Gewinnziel unter 3%. Bei zu hohem Mindestlot riskiert der Bot **nicht** mehr als vorgesehen, sondern überspringt den Trade.
-- **Keine Tages-/Monatsgewinnlimits und kein Tages-/Monatsverluststopp.** Trades pro Tag **nicht begrenzt**. Höchstens **4 gleichzeitige Positionen**, maximal 1 je Instrument. **Kumuliertes vorgesehenes Stop-Loss-Risiko bis 4% des aktuellen Kontoeigenkapitals** (bei 2.000 EUR etwa 80 EUR) bei 4 offenen Positionen. Mehrere Verlusttrades am Tag können sich aufsummieren, auch über 4% Tagesverlust hinaus. Das ist sehr risikoreich.
-- Standardmäßig Handelsfenster 7–21 Uhr UTC, Wochenendtrading ausschließlich in verfügbaren Kryptowährungs-Märkten. Kein Erzwingen von Trades ohne passende Signale oder verfügbare Margin.
-- Ein *serverseitiger Stop-Loss und Take-Profit* wird **sofort bei der Ordereröffnung** hinterlegt. Ein 1%-Marktpreisverlust ist nicht dasselbe wie 1% **Kontorisiko**. Stopps sind keine Ausführungsgarantie.
-- Optionales automatisches Nachziehen des Stop-Loss ab ca. 1,1 ATR und frühzeitiger Ausstieg bei bestätigter M15-Trendumkehr bleiben aus dem adaptiven Bot erhalten. Ein Trailing-Stop kann den Trade **vor** 3R schließen, um Gewinn zu schützen; der 3R-TP wird beim Verschieben des SL erhalten.
-- M15: Richtung mit EMA20/EMA50, M5: Entry mit EMA9/EMA21 und RSI14. ATR14 bestimmt Stopabstand; Volumen in Broker-Einheiten wird aus geplantem Verlustbudget berechnet.
-- **Lernen aus mehreren Verlusten**: getrennt für Gold, Silber, Bitcoin und Ethereum sowie Long/Short je 12 geschlossene Positionen. Ab mindestens 8 Verlustpositionen und negativer Nettosumme wird der DEFENSIVE-Modus aktiv: strengere Signalregeln und **nur noch 0,5% Kontorisiko pro neuem Trade**, daher ca. 1,5% Zielrendite bei 3R vor Kosten. Rückkehr zu Normal, sobald das rollierende Fenster die Bedingung nicht mehr erfüllt.
-- Der Code ist **regelbasiert adaptiv**, kein neuronales, selbstlernendes KI-Modell. Lernhistorie wird aus der cTrader-Brokerhistorie rekonstruiert.
+## Was „1 % Risiko“ bedeutet
+Diese 1 % beziehen sich auf die **Kontoequity**, nicht auf eine Kursänderung des gehandelten Instruments. Der Bot verwendet ATR und Spread für den Stop-Abstand und rundet die berechnete Stückzahl nach Brokerregeln **ab**. Bei Mindestlots oder Marginmangel überspringt er die Order statt die Risikogrenze zu verletzen. Bei 2.000 EUR Equity entsprechen die Risikostufen ungefähr 5/10/15/20 EUR je Trade, sofern Broker-Mindestgrößen diese zulassen. Die Kontowährung ist nicht zwangsläufig EUR.
 
-## Installation
-1. Unter [GitHub Actions](../../actions/workflows/rr13-build.yml) den jüngsten erfolgreich abgeschlossenen Build "Build Marius RR13 DEMO" öffnen und das Artefakt `MariusRR13Demo-algo` herunterladen.
-2. Die enthaltene `.algo`-Datei auf deinem iPad in Pepperstone cTrader importieren.
-3. **Alte laufende adaptive Bot-Instanz stoppen** und vorhandene Positionen kontrollieren / bewusst schließen. **Nicht beide Bots auf demselben Demokonto parallel**.
-4. Eine Instanz `MariusRR13Demo` im separaten Demokonto starten. Im Journal auf `RR13 DEMO`, `RISK ALLOCATION`, `SIGNAL`, `DEMO ORDER OPENED`, `MIN LOT NOT AFFORDABLE` und `LEARNING` achten.
+## Installation auf dem iPad
+1. In GitHub Actions den neuesten erfolgreichen `Build Marius RR13 DEMO` öffnen. Artefakt `MariusRR13Demo-algo` herunterladen und die `.algo`-Datei in cTrader importieren.
+2. Bestehende Bot-Instanzen auf **demselben** Demokonto stoppen und offene Positionen prüfen bzw. kontrolliert schließen; dieser Bot führt nur seine eigenen Trades.
+3. Genau **eine** Instanz `MariusRR13Demo` auf einem separaten Demokonto starten. Livekonten sind hart blockiert.
+4. Journal prüfen: `RISK ALLOCATION` mit Stärke, Risikostufe und Positionsanzahl, `SIGNAL`, `DEMO ORDER OPENED`, `TRAIL`, `LEARNING`, `MIN LOT NOT AFFORDABLE`.
+5. Mehrere Wochen Demo und Backtests durchführen und Orderfehler, Margin, Slippage, Profits und Drawdowns auswerten. Ein erfolgreicher Build ist **kein Beweis für profitable Ergebnisse**.
 
-## Risiko und Teststatus
-Diese Variante ist bewusst spekulativ. Vier Positionen können zusammen 4% geplantes Anfangsrisiko bedeuten. Mehrere abgeschlossene Verlustpositionen können einen noch größeren Tagesverlust auslösen. Marktpreis-Lücken, fehlende Liquidität, Stop-Slippage, Gebühren und technische Fehler können 1% Verlust je Trade überschreiten. Auch 3R-Gewinne sind nicht gesichert. Kompiliert heißt **nicht** backgetestet oder profitabel. Vor Echtgeldhandel umfassend im Demo- und Backtest prüfen.
-
-Die 1%- und 3%-Werte gelten für das **Konto**, nicht für prozentuale Veränderungen des Bitcoin-, Gold-, Silber- oder Ethereum-Kurses.
+## Grenzen
+- Regeln reagieren nach vielen Verlusten defensiver, aber das ist **keine frei trainierende neuronale KI**.
+- Bei Cloud-Neustarts sind die Broker-Positionen noch vorhanden; dynamische Trailing-Verwaltung ist nur bei laufender Instanz aktiv. Der zuletzt erfolgreich beim Broker gesetzte Stop-Loss bleibt soweit brokerseitig ausgeführt bestehen.
+- 1 % geplantes Risiko ist kein garantierter Höchstverlust. Es gibt keinen systemweiten Tages-Verluststopp. Vier Märkte werden beobachtet, aber maximal zwei dürfen gleichzeitig offene Positionen haben.
+- Stopps und Veränderungen wirken nur auf die Positionen mit diesem Bot-Label. Manuelle Trades und mehrere Bots auf demselben Konto beeinträchtigen die Berechnungen; deshalb getrennt testen.
