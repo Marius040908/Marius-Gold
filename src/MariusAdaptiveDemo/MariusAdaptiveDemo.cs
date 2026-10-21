@@ -30,13 +30,13 @@ namespace cAlgo.Robots
         [Parameter("Ethereum symbol", DefaultValue = "ETHUSD")]
         public string EthereumName { get; set; }
 
-        [Parameter("Daily loss limit (%)", DefaultValue = 3.0, MinValue = 3.0, MaxValue = 3.0)]
+        [Parameter("Daily loss limit (%)", DefaultValue = 1.0, MinValue = 1.0, MaxValue = 1.0)]
         public double DailyLossPercent { get; set; }
 
         [Parameter("Monthly profit target (%)", DefaultValue = 10.0, MinValue = 10.0, MaxValue = 10.0)]
         public double MonthlyProfitPercent { get; set; }
 
-        [Parameter("Risk per position (%)", DefaultValue = 0.50, MinValue = 0.1, MaxValue = 0.50)]
+        [Parameter("Risk per position (%)", DefaultValue = 0.20, MinValue = 0.1, MaxValue = 0.20)]
         public double RiskPercent { get; set; }
 
         [Parameter("Max simultaneous positions", DefaultValue = 4, MinValue = 1, MaxValue = 4)]
@@ -87,6 +87,7 @@ namespace cAlgo.Robots
         private bool _monthlyHalted;
         private bool _halted;
         private string _reason = "";
+        private readonly Dictionary<long, int> _reachedProfitTiers = new Dictionary<long, int>();
 
         protected override void OnStart()
         {
@@ -121,8 +122,9 @@ namespace cAlgo.Robots
 
             Print("MULTI-ASSET DEMO START | account currency={0} | balance={1:F2} | equity={2:F2} | orders={3}",
                 Account.Asset.Name, Account.Balance, Account.Equity, EnableDemoOrders);
-            Print("ONE INSTANCE ONLY. NO DAILY TRADE COUNT LIMIT. UP TO FOUR simultaneous positions (one per market). DAILY LOSS STOP -3%, MONTHLY PROFIT TARGET +10%.");
-            Print("NO daily profit stop: remaining monthly target is ONLY informational. Position risk <=0.50%, combined initial SL risk <=2.00% of daily start.");
+            Print("ONE INSTANCE ONLY. NO DAILY TRADE COUNT LIMIT. UP TO FOUR simultaneous positions (one per market). DAILY LOSS STOP -1%, MONTHLY PROFIT TARGET +10%.");
+            Print("NO daily profit stop; monthly guide is ONLY informational. Risk per trade <=0.20%, combined estimated SL risk <=0.80%.");
+            Print("DYNAMIC EXIT: NO FIXED TAKE PROFIT. Trailing stop, breakeven protection, confirmed M15 trend-reversal exits; 15/25/40 account-unit milestones are informational.");
             Print("Auto-symbol detection enabled. DEMO orders default ON; select demo account only.");
             Print("ADAPTIVE DEMO v2: M15 trend + M5 entry; independently checks last 12 closed trades for each market and direction.");
             Print("Learns by increasing selectivity and REDUCING risk after >=8 losses AND negative net profit in last 12 completed positions.");
@@ -243,6 +245,14 @@ namespace cAlgo.Robots
             if (!WithinSession(Server.Time))
             {
                 CloseBotPositions("Outside UTC day session");
+                return;
+            }
+
+            ManageOpenPositions();
+            CheckDailyStops();
+            if (_halted)
+            {
+                CloseBotPositions(_reason);
                 return;
             }
 
@@ -394,7 +404,7 @@ namespace cAlgo.Robots
             else if (pnl <= -dayStart * DailyLossPercent / 100.0)
             {
                 _halted = true;
-                _reason = "DAILY LOSS LIMIT -3% triggered";
+                _reason = "DAILY LOSS LIMIT -1% triggered";
             }
 
             if (_halted)
@@ -537,9 +547,8 @@ namespace cAlgo.Robots
                 return;
             }
 
-            // Stop is ATR-based and wider than 3x spread; avoid false precision.
+            // Volatility-based protective SL. No fixed TP: profits can exceed 15/25/40 units.
             double stopPips = Math.Max(1.5 * atr / m.Symbol.PipSize, Math.Max(3 * spreadPips, 2));
-            double takePips = stopPips * 1.5;
             double start = TodayStartingBalance();
             double dailyPnl = TodayNetPnl();
             double remainingDailyLoss = start * DailyLossPercent / 100.0 + dailyPnl;
@@ -549,7 +558,7 @@ namespace cAlgo.Robots
                                              Math.Max(0, remainingDailyLoss * 0.45));
 
             // Safety: four positions are permitted, not mandatory. This cap limits the
-            // sum of estimated stop-loss risks to 2% of daily start capital.
+            // sum of estimated stop-loss risks to 0.8% of daily start capital.
             // BTC and ETH may still both lose together; slippage/fees can exceed estimates.
             double openRisk = 0.0;
             foreach (var p in BotPositions())
@@ -563,7 +572,7 @@ namespace cAlgo.Robots
                 double pipsAtStop = Math.Abs(p.EntryPrice - p.StopLoss.Value) / sym.PipSize;
                 openRisk += sym.AmountRisked(p.VolumeInUnits, pipsAtStop);
             }
-            double portfolioBudget = Math.Max(0, start * 0.020 - openRisk);
+            double portfolioBudget = Math.Max(0, start * 0.008 - openRisk);
             positionBudget = Math.Min(positionBudget, portfolioBudget);
 
             if (positionBudget <= 0)
@@ -603,9 +612,9 @@ namespace cAlgo.Robots
                 return;
             }
 
-            Print("SIGNAL {0} {1} | M15 trend confirmed | adaptive defense={2} | RSI={3:F1} | units={4} (~{5:F5} lots) | risk~{6:F2} | margin~{7:F2} | SL {8:F1}p TP {9:F1}p.",
+            Print("SIGNAL {0} {1} | M15 trend confirmed | adaptive defense={2} | RSI={3:F1} | units={4} (~{5:F5} lots) | risk~{6:F2} | margin~{7:F2} | SL {8:F1}p, NO FIXED TP, adaptive trailing exit.",
                 m.Symbol.Name, direction, selectedLearning.Defensive, rsi, units,
-                units / m.Symbol.LotSize, estimatedRisk, margin, stopPips, takePips);
+                units / m.Symbol.LotSize, estimatedRisk, margin, stopPips);
 
             if (!EnableDemoOrders)
             {
@@ -618,12 +627,108 @@ namespace cAlgo.Robots
                 !m.Symbol.MarketHours.IsOpened() || BotPositions().Any(p => p.SymbolName == m.Symbol.Name))
                 return;
 
-            var result = ExecuteMarketOrder(direction, m.Symbol.Name, units, BotLabel, stopPips, takePips);
+            var result = ExecuteMarketOrder(direction, m.Symbol.Name, units, BotLabel, stopPips, null);
             if (result.IsSuccessful)
                 Print("DEMO ORDER OPENED {0}, position id {1}", m.Symbol.Name, result.Position.Id);
             else
                 Print("DEMO ORDER REJECTED {0} | ERROR={1} | margin={2:F2} free={3:F2}.",
                     m.Symbol.Name, result.Error, margin, Account.FreeMargin);
+        }
+
+        // Adaptive profit-taking on each 10-second timer tick.
+        // Requires this cBot instance to keep running: the broker SL protects a trade
+        // between ticks, but discretionary trend exits / future SL updates are not server-side.
+        // SL always moves in the protective direction; never loosen it.
+        private void ManageOpenPositions()
+        {
+            var positions = BotPositions();
+            var liveIds = new HashSet<long>(positions.Select(p => (long)p.Id));
+            foreach (var old in _reachedProfitTiers.Keys.Where(id => !liveIds.Contains(id)).ToArray())
+                _reachedProfitTiers.Remove(old);
+
+            foreach (var position in positions)
+            {
+                var market = _markets.FirstOrDefault(m => m.Symbol.Name == position.SymbolName);
+                if (market == null || market.Bars.Count < 60 || market.TrendBars.Count < 60 ||
+                    !market.Symbol.MarketHours.IsOpened() || !position.StopLoss.HasValue)
+                    continue;
+
+                int profitTier = position.NetProfit >= 40 ? 3 :
+                                 position.NetProfit >= 25 ? 2 :
+                                 position.NetProfit >= 15 ? 1 : 0;
+                int previousTier;
+                if (!_reachedProfitTiers.TryGetValue(position.Id, out previousTier))
+                    previousTier = 0;
+                if (profitTier > previousTier)
+                {
+                    Print("RUNNER MILESTONE {0}: position={1}, floating net P&L={2:F2} {3} (15/25/40 are observations, NOT exit caps).",
+                        position.SymbolName, position.Id, position.NetProfit, Account.Asset.Name);
+                    _reachedProfitTiers[position.Id] = profitTier;
+                }
+
+                double atr = ComputeAtr(market.Bars, 14);
+                if (!Finite(atr) || atr <= 0)
+                    continue;
+
+                var symbol = market.Symbol;
+                bool buy = position.TradeType == TradeType.Buy;
+                double marketExitPrice = buy ? symbol.Bid : symbol.Ask;
+                double favorableMove = buy ? marketExitPrice - position.EntryPrice :
+                                             position.EntryPrice - marketExitPrice;
+                double trendFast = market.TrendFast.Result.Last(1);
+                double trendSlow = market.TrendSlow.Result.Last(1);
+                double prevFast = market.TrendFast.Result.Last(2);
+                double prevSlow = market.TrendSlow.Result.Last(2);
+                if (!Finite(marketExitPrice) || !Finite(trendFast) || !Finite(trendSlow) ||
+                    !Finite(prevFast) || !Finite(prevSlow))
+                    continue;
+
+                bool confirmedReversal = buy ? (trendFast < trendSlow && prevFast < prevSlow)
+                                              : (trendFast > trendSlow && prevFast > prevSlow);
+                if (confirmedReversal)
+                {
+                    var exit = ClosePosition(position);
+                    Print("ADAPTIVE EXIT {0} pos={1}: M15 trend reversal confirmed; success={2}, error={3}, floating net P&L={4:F2}.",
+                        symbol.Name, position.Id, exit.IsSuccessful, exit.Error, position.NetProfit);
+                    continue;
+                }
+
+                // Do not trail until the position has earned at least ~1 ATR in price movement.
+                // At ~1.1 ATR, protect a small amount of favorable price movement.
+                if (favorableMove < 1.1 * atr)
+                    continue;
+
+                bool trendAligned = buy ? trendFast > trendSlow : trendFast < trendSlow;
+                // Strong trends receive more room, letting profitable trades run.
+                double trailAtrMultiplier = trendAligned ? (favorableMove >= 3.0 * atr ? 1.65 : 1.90) : 1.10;
+                double candidate = buy ? marketExitPrice - trailAtrMultiplier * atr :
+                                         marketExitPrice + trailAtrMultiplier * atr;
+                double entryProtect = buy ? position.EntryPrice + 0.10 * atr :
+                                            position.EntryPrice - 0.10 * atr;
+                candidate = buy ? Math.Max(candidate, entryProtect) :
+                                  Math.Min(candidate, entryProtect);
+                candidate = Math.Round(candidate, symbol.Digits);
+
+                // Leave room for spread, broker SL distance and price ticks.
+                double safetyGap = Math.Max(3.0 * Math.Max(symbol.Spread, symbol.PipSize), 2.0 * symbol.PipSize);
+                double step = Math.Max(0.15 * atr, 2.0 * symbol.PipSize);
+                double oldStop = position.StopLoss.Value;
+                bool insideMarket = buy ? candidate < symbol.Bid - safetyGap :
+                                           candidate > symbol.Ask + safetyGap;
+                bool tightens = buy ? candidate >= oldStop + step :
+                                      candidate <= oldStop - step;
+                if (!Finite(candidate) || !insideMarket || !tightens)
+                    continue;
+
+                var modification = ModifyPosition(position, candidate, null, ProtectionType.Absolute);
+                if (modification.IsSuccessful)
+                    Print("TRAIL {0} pos={1} | old SL={2:F5} -> new SL={3:F5} | floating net={4:F2} {5} | ATR={6:F5} | aligned trend={7}.",
+                        symbol.Name, position.Id, oldStop, candidate, position.NetProfit,
+                        Account.Asset.Name, atr, trendAligned);
+                else
+                    Print("TRAIL REJECTED {0} pos={1} | new SL={2:F5} | error={3}.",
+                        symbol.Name, position.Id, candidate, modification.Error);
+            }
         }
 
         private static double ComputeAtr(Bars bars, int periods)
