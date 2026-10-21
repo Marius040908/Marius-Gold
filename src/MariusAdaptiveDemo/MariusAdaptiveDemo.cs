@@ -569,8 +569,13 @@ namespace cAlgo.Robots
                     Print("SKIP {0}: existing position has unknown stop/risk.", m.Symbol.Name);
                     return;
                 }
-                double pipsAtStop = Math.Abs(p.EntryPrice - p.StopLoss.Value) / sym.PipSize;
-                openRisk += sym.AmountRisked(p.VolumeInUnits, pipsAtStop);
+                // A trailing SL beyond the entry protects profit; its distance from
+                // entry must NOT be counted as remaining downside risk.
+                double lossDistance = p.TradeType == TradeType.Buy
+                    ? p.EntryPrice - p.StopLoss.Value
+                    : p.StopLoss.Value - p.EntryPrice;
+                if (lossDistance > 0)
+                    openRisk += sym.AmountRisked(p.VolumeInUnits, lossDistance / sym.PipSize);
             }
             double portfolioBudget = Math.Max(0, start * 0.008 - openRisk);
             positionBudget = Math.Min(positionBudget, portfolioBudget);
