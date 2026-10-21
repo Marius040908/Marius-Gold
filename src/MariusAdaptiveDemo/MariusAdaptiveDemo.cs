@@ -36,10 +36,10 @@ namespace cAlgo.Robots
         [Parameter("Monthly profit target (%)", DefaultValue = 10.0, MinValue = 10.0, MaxValue = 10.0)]
         public double MonthlyProfitPercent { get; set; }
 
-        [Parameter("Risk per position (%)", DefaultValue = 0.75, MinValue = 0.1, MaxValue = 1.0)]
+        [Parameter("Risk per position (%)", DefaultValue = 0.50, MinValue = 0.1, MaxValue = 0.50)]
         public double RiskPercent { get; set; }
 
-        [Parameter("Max simultaneous positions", DefaultValue = 2, MinValue = 1, MaxValue = 2)]
+        [Parameter("Max simultaneous positions", DefaultValue = 4, MinValue = 1, MaxValue = 4)]
         public int MaxOpenPositions { get; set; }
 
         [Parameter("UTC session starts", DefaultValue = 7, MinValue = 0, MaxValue = 22)]
@@ -83,6 +83,8 @@ namespace cAlgo.Robots
 
         private readonly List<MarketState> _markets = new List<MarketState>();
         private DateTime _day;
+        private DateTime _month;
+        private bool _monthlyHalted;
         private bool _halted;
         private string _reason = "";
 
@@ -103,6 +105,8 @@ namespace cAlgo.Robots
             }
 
             _day = Server.Time.Date;
+            _month = new DateTime(Server.Time.Year, Server.Time.Month, 1);
+            _monthlyHalted = false;
             AddMarket(GoldName, false);
             AddMarket(SilverName, false);
             AddMarket(BitcoinName, true);
@@ -117,8 +121,8 @@ namespace cAlgo.Robots
 
             Print("MULTI-ASSET DEMO START | account currency={0} | balance={1:F2} | equity={2:F2} | orders={3}",
                 Account.Asset.Name, Account.Balance, Account.Equity, EnableDemoOrders);
-            Print("ONE INSTANCE ONLY. Unlimited daily trade count. DAILY LOSS STOP -3%; MONTHLY PROFIT TARGET +10%.");
-            Print("Adaptive DAILY profit stop = remaining month gap distributed over remaining UTC calendar days via compounding; NEVER increases position risk.");
+            Print("ONE INSTANCE ONLY. NO DAILY TRADE COUNT LIMIT. UP TO FOUR simultaneous positions (one per market). DAILY LOSS STOP -3%, MONTHLY PROFIT TARGET +10%.");
+            Print("NO daily profit stop: remaining monthly target is ONLY informational. Position risk <=0.50%, combined initial SL risk <=2.00% of daily start.");
             Print("Auto-symbol detection enabled. DEMO orders default ON; select demo account only.");
             Print("ADAPTIVE DEMO v2: M15 trend + M5 entry; independently checks last 12 closed trades for each market and direction.");
             Print("Learns by increasing selectivity and REDUCING risk after >=8 losses AND negative net profit in last 12 completed positions.");
@@ -210,12 +214,20 @@ namespace cAlgo.Robots
             if (Account.IsLive)
                 return;
 
+            var currentMonth = new DateTime(Server.Time.Year, Server.Time.Month, 1);
+            if (currentMonth != _month)
+            {
+                _month = currentMonth;
+                _monthlyHalted = false;
+                Print("NEW UTC MONTH {0:yyyy-MM}; monthly trading lock reset.", _month);
+            }
+
             if (Server.Time.Date != _day)
             {
                 _day = Server.Time.Date;
                 _halted = false;
                 _reason = "";
-                Print("NEW UTC DAY {0:yyyy-MM-dd}. Recheck accumulated daily/monthly history.", _day);
+                Print("NEW UTC DAY {0:yyyy-MM-dd}. No daily profit cap. Recheck monthly target.", _day);
                 PrintMonthlyPlan();
             }
 
@@ -321,11 +333,32 @@ namespace cAlgo.Robots
             }
 
             double monthTarget = monthStart * (1.0 + MonthlyProfitPercent / 100.0);
-            double dayGoal = DynamicDailyProfitGoal(monthStart, dayStart);
-            Print("MONTH PLAN: month start~{0:F2}; target +{1:F1}% => {2:F2}; equity={3:F2} {4}; remaining UTC days={5}; DAILY PROFIT TARGET~{6:F2} ({7:F3}%) vs DAY START {8:F2}; DAILY LOSS LIMIT -{9:F1}% (~{10:F2}).",
+            double dayGuide = DynamicDailyProfitGoal(monthStart, dayStart);
+            Print("MONTH PLAN: month start~{0:F2}; +{1:F1}% MONTH GOAL => {2:F2}; equity={3:F2} {4}; UTC days left={5}; indicative DAILY PACE~{6:F2} ({7:F3}%) only; NO DAILY PROFIT STOP; DAY LOSS -{8:F1}% (~{9:F2}); max 4 open.",
                 monthStart, MonthlyProfitPercent, monthTarget, Account.Equity, Account.Asset.Name,
-                RemainingCalendarDays(), dayGoal, dayStart > 0 ? 100.0 * dayGoal / dayStart : 0,
-                dayStart, DailyLossPercent, dayStart * DailyLossPercent / 100.0);
+                RemainingCalendarDays(), dayGuide, dayStart > 0 ? 100.0 * dayGuide / dayStart : 0,
+                DailyLossPercent, dayStart * DailyLossPercent / 100.0);
+        }
+
+        // Reconstruct whether closed bot deals ever took the month above target.
+        // A restart after an intra-trade equity spike may still lose the in-memory lock
+        // if the completed close finishes below the target. See README limitations.
+        private bool MonthRealizedTargetReached(double monthStart)
+        {
+            if (!Finite(monthStart) || monthStart <= 0)
+                return false;
+            double cumulative = 0;
+            double threshold = monthStart * MonthlyProfitPercent / 100.0;
+            var first = new DateTime(Server.Time.Year, Server.Time.Month, 1);
+            foreach (var trade in History.FindAll(BotLabel)
+                .Where(x => x.ClosingTime >= first && x.ClosingTime <= Server.Time)
+                .OrderBy(x => x.ClosingTime))
+            {
+                cumulative += trade.NetProfit;
+                if (cumulative >= threshold)
+                    return true;
+            }
+            return false;
         }
 
         private void CheckDailyStops()
@@ -338,30 +371,30 @@ namespace cAlgo.Robots
             double monthStart = MonthStartingBalance();
             double pnl = TodayNetPnl();
             double equity = Account.Equity;
-            double goal = DynamicDailyProfitGoal(monthStart, dayStart);
             double monthlyTarget = monthStart * (1.0 + MonthlyProfitPercent / 100.0);
 
             if (!Finite(dayStart) || !Finite(monthStart) || !Finite(pnl) ||
-                !Finite(equity) || !Finite(goal) ||
-                dayStart <= 0 || monthStart <= 0)
+                !Finite(equity) || dayStart <= 0 || monthStart <= 0)
             {
                 _halted = true;
                 _reason = "Invalid account or history data";
+            }
+            else if (_monthlyHalted || MonthRealizedTargetReached(monthStart))
+            {
+                _monthlyHalted = true;
+                _halted = true;
+                _reason = "MONTHLY PROFIT TARGET already achieved; locked until next UTC month";
+            }
+            else if (equity >= monthlyTarget)
+            {
+                _monthlyHalted = true;
+                _halted = true;
+                _reason = "MONTHLY PROFIT TARGET +10% reached; close bot positions";
             }
             else if (pnl <= -dayStart * DailyLossPercent / 100.0)
             {
                 _halted = true;
                 _reason = "DAILY LOSS LIMIT -3% triggered";
-            }
-            else if (equity >= monthlyTarget)
-            {
-                _halted = true;
-                _reason = "MONTHLY PROFIT TARGET +10% reached";
-            }
-            else if (goal > 0 && pnl >= goal)
-            {
-                _halted = true;
-                _reason = "Dynamic daily profit target reached";
             }
 
             if (_halted)
@@ -515,7 +548,9 @@ namespace cAlgo.Robots
             double positionBudget = Math.Min(Account.Equity * RiskPercent / 100.0 * learningRiskFactor,
                                              Math.Max(0, remainingDailyLoss * 0.45));
 
-            // Avoid risk piling up through correlated positions (e.g. BTC and ETH).
+            // Safety: four positions are permitted, not mandatory. This cap limits the
+            // sum of estimated stop-loss risks to 2% of daily start capital.
+            // BTC and ETH may still both lose together; slippage/fees can exceed estimates.
             double openRisk = 0.0;
             foreach (var p in BotPositions())
             {
@@ -528,7 +563,7 @@ namespace cAlgo.Robots
                 double pipsAtStop = Math.Abs(p.EntryPrice - p.StopLoss.Value) / sym.PipSize;
                 openRisk += sym.AmountRisked(p.VolumeInUnits, pipsAtStop);
             }
-            double portfolioBudget = Math.Max(0, start * 0.015 - openRisk);
+            double portfolioBudget = Math.Max(0, start * 0.020 - openRisk);
             positionBudget = Math.Min(positionBudget, portfolioBudget);
 
             if (positionBudget <= 0)
