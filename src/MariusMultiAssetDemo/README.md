@@ -6,7 +6,7 @@
 - Eine einzige Demo-Instanz beobachtet Gold (XAUUSD), Silber (XAGUSD), Bitcoin (BTCUSD) und Ethereum (ETHUSD) auf M5. Erkennt die Standard-Symbole automatisch und auch eindeutige Broker-Suffixe; nur bei mehreren möglichen Treffern einmal exakten Symbolnamen einstellen.
 - EMA 9/21, RSI 14, ATR-Stop-Loss mit Take-Profit beim 1,5-Fachen des anfänglichen Stopabstands. Long und Short.
 - Keine feste Anzahl von Trades am Tag; maximal zwei Positionen gleichzeitig und eine Position je Instrument. Standardrisiko 0,75 % des Kontostands je Position, maximal 1 %.
-- Tagesstopp bei -5 % und Gewinnstopp bei +10 % oder 10 Einheiten Kontowährung (was zuerst erreicht wird). Mit einem 100-EUR-Demokonto anfangs -5 EUR und +10 EUR. Gewinne oder Grenzen sind niemals garantiert.
+- Tagesstopp bei -5 % und Gewinnzielstopp bei +10 % des rekonstruierten Tagesstartkapitals. **Keine feste 10-EUR-Grenze!** Bei 100 EUR zu Tagesbeginn sind das -5 EUR und +10 EUR; bei 2.000 EUR zu Tagesbeginn -100 EUR und +200 EUR. Gewinne oder exakte Grenzen sind nicht garantiert.
 - Sicherheitsblockierung aller Echtgeldkonten. Demo-Orders sind standardmäßig aktiviert (nur DEMO, echte Konten programmatisch blockiert).
 - Eigenständige Prüfungen von Mindestvolumen, Mindest-Margin und geschätztem Stop-Loss-Risiko. KEINE erzwungenen 0,01 Lot.
 - Journal zeigt verständliche Meldungen wie MIN LOT NOT AFFORDABLE, NO SIGNAL, SIGNAL-ONLY, ORDER REJECTED und HALT.
@@ -41,3 +41,6 @@
 Offizielle Hilfe: https://help.ctrader.com/cbots/de/how-tos/install-a-cbot/
 Cloud-Hilfe: https://help.ctrader.com/ctrader-algo/mobile-algo/
 GitHub Actions: https://github.com/Marius040908/Marius-Gold/actions/workflows/multiasset-build.yml
+
+## Wichtiger Hinweis zu Versionen
+Die erste Version enthielt irrtümlich zusätzlich einen absoluten 10-EUR-Gewinnstopp. Diese Vorgabe wurde entfernt. **Nur die neu gebaute .algo-Datei aus dem jüngsten erfolgreichen Workflow herunterladen.** Vor dem Austausch die laufende Demo-Instanz stoppen und offene Positionen prüfen bzw. kontrolliert schließen. Die bereits laufende Cloud-Instanz aktualisiert ihren Code nicht automatisch.
