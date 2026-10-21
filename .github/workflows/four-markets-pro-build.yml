@@ -1,0 +1,32 @@
+name: Build & validate four-market demo bot
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/MariusFourMarketsProDemo/**'
+      - 'tests/MariusFourMarketsProDemo.Tests/**'
+      - '.github/workflows/four-markets-pro-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test trade sizing and learning thresholds
+        run: dotnet run --project tests/MariusFourMarketsProDemo.Tests/MariusFourMarketsProDemo.Tests.csproj --configuration Release
+      - name: Restore trading algorithm dependencies
+        run: dotnet restore src/MariusFourMarketsProDemo/MariusFourMarketsProDemo.csproj
+      - name: Build .algo
+        run: dotnet build src/MariusFourMarketsProDemo/MariusFourMarketsProDemo.csproj --configuration Release --no-restore
+      - name: Upload compiled demo bot
+        uses: actions/upload-artifact@v4
+        with:
+          name: MariusFourMarketsProDemo-algo
+          path: src/MariusFourMarketsProDemo/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
