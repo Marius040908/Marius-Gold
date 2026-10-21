@@ -1,0 +1,32 @@
+name: Build Unified DayTrader DEMO
+on:
+  push:
+    branches: [main, feature/unified-daytrader-demo-v2]
+    paths:
+      - 'src/MariusUnifiedDayTraderDemo/**'
+      - 'tests/MariusUnifiedDayTraderDemo.Tests/**'
+      - '.github/workflows/unified-daytrader-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test risk math
+        run: dotnet run --project tests/MariusUnifiedDayTraderDemo.Tests/MariusUnifiedDayTraderDemo.Tests.csproj --configuration Release
+      - name: Restore cTrader dependencies
+        run: dotnet restore src/MariusUnifiedDayTraderDemo/MariusUnifiedDayTraderDemo.csproj
+      - name: Build unified bot
+        run: dotnet build src/MariusUnifiedDayTraderDemo/MariusUnifiedDayTraderDemo.csproj --configuration Release --no-restore
+      - name: Upload .algo demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: MariusUnifiedDayTraderDemo-algo
+          path: src/MariusUnifiedDayTraderDemo/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
