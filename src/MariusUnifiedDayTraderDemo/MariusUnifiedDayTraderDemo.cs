@@ -222,6 +222,7 @@ namespace cAlgo.Robots
         protected override void OnTimer()
         {
             if (Account.IsLive) return;
+            CloseNearBrokerSessionEnd();
             if (DailyLossBreach())
             {
                 CloseBotPositions("3% daily drawdown: close owned positions and stop new entries");
@@ -249,6 +250,30 @@ namespace cAlgo.Robots
             }
             foreach (var market in _markets)
                 Evaluate(market);
+        }
+
+        private void CloseNearBrokerSessionEnd()
+        {
+            foreach (var p in BotPositions())
+            {
+                var instrument = Symbols.GetSymbol(p.SymbolName);
+                if (instrument == null || !instrument.MarketHours.IsOpened()) continue;
+                TimeSpan left = instrument.MarketHours.TimeTillClose();
+                bool brokerCloses = left > TimeSpan.Zero && left <= TimeSpan.FromMinutes(5);
+                bool isStock = _markets.Any(m => m.MarketKind == 4 && m.Symbol.Name == p.SymbolName);
+                bool beforeUsStockClose = false;
+                if (isStock && _newYork != null)
+                {
+                    DateTime ny = TimeZoneInfo.ConvertTimeFromUtc(
+                        DateTime.SpecifyKind(Server.Time, DateTimeKind.Utc), _newYork);
+                    beforeUsStockClose = ny.TimeOfDay >= new TimeSpan(15, 55, 0);
+                }
+                if (brokerCloses || beforeUsStockClose)
+                {
+                    var response = ClosePosition(p);
+                    Print("END-SESSION CLOSE {0}: success={1} error={2}", p.SymbolName, response.IsSuccessful, response.Error);
+                }
+            }
         }
 
         private bool WithinSession(DateTime t) =>
@@ -379,6 +404,12 @@ namespace cAlgo.Robots
             if (!m.Symbol.MarketHours.IsOpened())
             {
                 Print("SKIP {0}: broker market closed.", m.Symbol.Name);
+                return;
+            }
+            var timeToClose = m.Symbol.MarketHours.TimeTillClose();
+            if (timeToClose <= TimeSpan.FromMinutes(10))
+            {
+                Print("SKIP {0}: broker session ends within 10 minutes.", m.Symbol.Name);
                 return;
             }
             if (BotPositions().Any(p => p.SymbolName == m.Symbol.Name))
