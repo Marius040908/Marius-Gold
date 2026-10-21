@@ -20,12 +20,16 @@ jobs:
         run: dotnet restore src/MariusBitcoin/MariusBitcoin.csproj
       - name: Build .algo
         run: dotnet build src/MariusBitcoin/MariusBitcoin.csproj -c Release --no-restore -p:AlgoPublish=false
-      - name: Locate compiled cBot
-        run: find src/MariusBitcoin -name '*.algo' -type f -print
+      - name: Prepare named installable cBot
+        run: |
+          mkdir -p dist
+          ALGO="$(find src/MariusBitcoin -name '*.algo' -type f | head -n 1)"
+          test -n "$ALGO"
+          cp "$ALGO" dist/MariusBitcoinDayTrader.algo
       - name: Upload cTrader bot
         uses: actions/upload-artifact@v4
         with:
           name: MariusBitcoinDayTrader-DEMO
-          path: src/MariusBitcoin/**/*.algo
+          path: dist/MariusBitcoinDayTrader.algo
           if-no-files-found: error
           retention-days: 30
