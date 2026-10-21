@@ -252,6 +252,7 @@ namespace cAlgo.Robots
         }
 
         private bool WithinSession(DateTime t) =>
+            t.DayOfWeek != DayOfWeek.Saturday && t.DayOfWeek != DayOfWeek.Sunday &&
             t.Hour >= SessionStart && t.Hour < SessionEnd;
 
         private bool WeekdayOrCrypto(MarketState market) =>
