@@ -36,7 +36,7 @@ namespace cAlgo.Robots
         [Parameter("Monthly profit target (%)", DefaultValue = 10.0, MinValue = 10.0, MaxValue = 10.0)]
         public double MonthlyProfitPercent { get; set; }
 
-        [Parameter("Risk per position (%)", DefaultValue = 0.20, MinValue = 0.1, MaxValue = 0.20)]
+        [Parameter("Maximum risk for sole position (%)", DefaultValue = 0.50, MinValue = 0.50, MaxValue = 0.50)]
         public double RiskPercent { get; set; }
 
         [Parameter("Max simultaneous positions", DefaultValue = 4, MinValue = 1, MaxValue = 4)]
@@ -123,7 +123,7 @@ namespace cAlgo.Robots
             Print("MULTI-ASSET DEMO START | account currency={0} | balance={1:F2} | equity={2:F2} | orders={3}",
                 Account.Asset.Name, Account.Balance, Account.Equity, EnableDemoOrders);
             Print("ONE INSTANCE ONLY. NO DAILY TRADE COUNT LIMIT. UP TO FOUR simultaneous positions (one per market). DAILY LOSS STOP -1%, MONTHLY PROFIT TARGET +10%.");
-            Print("NO daily profit stop; monthly guide is ONLY informational. Risk per trade <=0.20%, combined estimated SL risk <=0.80%.");
+            Print("NO daily profit stop; monthly guide is ONLY informational. Adaptive risk tiers: 1 position up to 0.50%, 2 up to 0.40% each, 3 up to 0.267% each, 4 up to 0.20% each. Combined estimated SL risk <=0.80%.");
             Print("DYNAMIC EXIT: NO FIXED TAKE PROFIT. Trailing stop, breakeven protection, confirmed M15 trend-reversal exits; 15/25/40 account-unit milestones are informational.");
             Print("Auto-symbol detection enabled. DEMO orders default ON; select demo account only.");
             Print("ADAPTIVE DEMO v2: M15 trend + M5 entry; independently checks last 12 closed trades for each market and direction.");
@@ -552,32 +552,56 @@ namespace cAlgo.Robots
             double start = TodayStartingBalance();
             double dailyPnl = TodayNetPnl();
             double remainingDailyLoss = start * DailyLossPercent / 100.0 + dailyPnl;
+            // Adaptive risk allocation. In an account with day-start capital of 2000 EUR:
+            // one open position may risk up to 10 EUR; two -> 8 EUR EACH;
+            // three -> 5.33 EUR EACH; four -> 4 EUR EACH.
+            // A new position is only considered once existing SL-risk is already
+            // below the more restrictive tier. NEVER widen an existing SL or
+            // increase a losing position to make room for another.
+            var existing = BotPositions();
+            int futurePositionCount = existing.Length + 1;
+            double totalRiskLimit = start * 0.008;
+            double perPositionLimit = Math.Min(start * RiskPercent / 100.0,
+                                               totalRiskLimit / futurePositionCount);
             // Poor repeated outcomes trigger half-risk mode, never an increase.
             double learningRiskFactor = selectedLearning.Defensive ? 0.5 : 1.0;
-            double positionBudget = Math.Min(Account.Equity * RiskPercent / 100.0 * learningRiskFactor,
-                                             Math.Max(0, remainingDailyLoss * 0.45));
+            double positionBudget = Math.Min(perPositionLimit * learningRiskFactor,
+                                    Math.Min(Account.Equity * RiskPercent / 100.0 * learningRiskFactor,
+                                             Math.Max(0, remainingDailyLoss * 0.50)));
 
-            // Safety: four positions are permitted, not mandatory. This cap limits the
-            // sum of estimated stop-loss risks to 0.8% of daily start capital.
-            // BTC and ETH may still both lose together; slippage/fees can exceed estimates.
+            // Combined initial stop-risk stays under 0.8% of the UTC daily start.
+            // Estimates exclude unpredictable gaps, slippage and some execution costs.
             double openRisk = 0.0;
-            foreach (var p in BotPositions())
+            foreach (var p in existing)
             {
                 var sym = Symbols.GetSymbol(p.SymbolName);
-                if (sym == null || !p.StopLoss.HasValue)
+                if (sym == null || !p.StopLoss.HasValue || sym.PipSize <= 0)
                 {
                     Print("SKIP {0}: existing position has unknown stop/risk.", m.Symbol.Name);
                     return;
                 }
-                // A trailing SL beyond the entry protects profit; its distance from
-                // entry must NOT be counted as remaining downside risk.
+                // SL on the protected/profitable side of entry contributes zero
+                // estimated entry-to-SL downside, not negative risk.
                 double lossDistance = p.TradeType == TradeType.Buy
                     ? p.EntryPrice - p.StopLoss.Value
                     : p.StopLoss.Value - p.EntryPrice;
-                if (lossDistance > 0)
-                    openRisk += sym.AmountRisked(p.VolumeInUnits, lossDistance / sym.PipSize);
+                double individualRisk = lossDistance > 0
+                    ? sym.AmountRisked(p.VolumeInUnits, lossDistance / sym.PipSize) : 0.0;
+                if (!Finite(individualRisk) || individualRisk < 0)
+                {
+                    Print("SKIP {0}: cannot estimate open position risk.", m.Symbol.Name);
+                    return;
+                }
+                if (individualRisk > perPositionLimit + 0.01)
+                {
+                    Print("WAIT {0}: opening position #{1} requires each existing risk <= {2:F2} {3}; pos {4} still risks ~{5:F2}. Waiting for protective SL to tighten.",
+                        m.Symbol.Name, futurePositionCount, perPositionLimit,
+                        Account.Asset.Name, p.Id, individualRisk);
+                    return;
+                }
+                openRisk += individualRisk;
             }
-            double portfolioBudget = Math.Max(0, start * 0.008 - openRisk);
+            double portfolioBudget = Math.Max(0, totalRiskLimit - openRisk);
             positionBudget = Math.Min(positionBudget, portfolioBudget);
 
             if (positionBudget <= 0)
@@ -585,6 +609,10 @@ namespace cAlgo.Robots
                 Print("SKIP {0}: daily/portfolio risk budget depleted.", m.Symbol.Name);
                 return;
             }
+
+            Print("RISK ALLOCATION {0}: existing={1}, proposed count={2}, per-position SL risk cap~{3:F2}, open risk~{4:F2}, available new risk~{5:F2}, daily loss cap~{6:F2} {7}.",
+                m.Symbol.Name, existing.Length, futurePositionCount, perPositionLimit,
+                openRisk, positionBudget, start * DailyLossPercent / 100.0, Account.Asset.Name);
 
             double minVol = m.Symbol.VolumeInUnitsMin;
             double minRisk = m.Symbol.AmountRisked(minVol, stopPips);
