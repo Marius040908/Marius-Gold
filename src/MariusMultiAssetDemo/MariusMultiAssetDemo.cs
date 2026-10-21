@@ -36,9 +36,6 @@ namespace cAlgo.Robots
         [Parameter("Daily profit stop (%)", DefaultValue = 10.0, MinValue = 10.0, MaxValue = 10.0)]
         public double DailyProfitPercent { get; set; }
 
-        [Parameter("Daily profit goal (account currency)", DefaultValue = 10.0, MinValue = 0.0)]
-        public double ProfitGoalAmount { get; set; }
-
         [Parameter("Risk per position (%)", DefaultValue = 0.75, MinValue = 0.1, MaxValue = 1.0)]
         public double RiskPercent { get; set; }
 
@@ -104,7 +101,7 @@ namespace cAlgo.Robots
 
             Print("MULTI-ASSET DEMO START | account currency={0} | balance={1:F2} | equity={2:F2} | orders={3}",
                 Account.Asset.Name, Account.Balance, Account.Equity, EnableDemoOrders);
-            Print("ONE INSTANCE ONLY. No daily trade count cap. Daily loss -5%; daily profit +10 account currency units or +10%, whichever comes first.");
+            Print("ONE INSTANCE ONLY. No daily trade count cap. Daily loss -5%; daily profit target +10% of UTC starting balance (NO fixed 10-unit cap).");
             Print("Auto-symbol detection enabled. DEMO orders default ON; select demo account only.");
             Print("NO GUARANTEED RETURNS. NO SELF-LEARNING AI. All four markets share ONE profit/loss limit.");
             Print("WARNING: demo cloud does not persist local storage across restarts. Use a dedicated account; no deposits/other trades.");
@@ -270,12 +267,10 @@ namespace cAlgo.Robots
                 _halted = true;
                 _reason = "DAILY LOSS -5% triggered";
             }
-            else if (pnl >= (ProfitGoalAmount > 0
-                ? Math.Min(start * DailyProfitPercent / 100.0, ProfitGoalAmount)
-                : start * DailyProfitPercent / 100.0))
+            else if (pnl >= start * DailyProfitPercent / 100.0)
             {
                 _halted = true;
-                _reason = "DAILY PROFIT target triggered (10 account units OR +10%, whichever first)";
+                _reason = "DAILY PROFIT +10% target reached";
             }
 
             if (_halted)
