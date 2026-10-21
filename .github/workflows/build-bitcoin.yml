@@ -1,0 +1,31 @@
+name: Build Marius Bitcoin DEMO
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/MariusBitcoin/**'
+      - '.github/workflows/build-bitcoin.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore src/MariusBitcoin/MariusBitcoin.csproj
+      - name: Build .algo
+        run: dotnet build src/MariusBitcoin/MariusBitcoin.csproj -c Release --no-restore -p:AlgoPublish=false
+      - name: Locate compiled cBot
+        run: find src/MariusBitcoin -name '*.algo' -type f -print
+      - name: Upload cTrader bot
+        uses: actions/upload-artifact@v4
+        with:
+          name: MariusBitcoinDayTrader-DEMO
+          path: src/MariusBitcoin/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
