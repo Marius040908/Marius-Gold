@@ -1,4 +1,4 @@
-name: Build & validate four-market demo bot
+name: Build Marius Four Markets Pro DEMO
 on:
   push:
     branches: [main]
