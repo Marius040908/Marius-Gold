@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>MariusFourMarketsVerified</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup><PackageReference Include="cTrader.Automate" Version="1.*"/></ItemGroup>
+</Project>
