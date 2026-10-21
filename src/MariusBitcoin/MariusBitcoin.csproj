@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>MariusBitcoinDayTrader</AssemblyName>
+    <AlgoName>MariusBitcoinDayTrader</AlgoName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
   </PropertyGroup>
