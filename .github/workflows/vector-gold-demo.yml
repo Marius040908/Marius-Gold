@@ -1,0 +1,37 @@
+name: Build VECTOR GOLD DEMO
+on:
+  push:
+    branches: [vector-gold-ctrader-demo-20261027]
+    paths:
+      - 'src/VectorGold/**'
+      - '.github/workflows/vector-gold-demo.yml'
+  pull_request:
+    paths:
+      - 'src/VectorGold/**'
+      - '.github/workflows/vector-gold-demo.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore src/VectorGold/VectorGold.csproj
+      - name: Build .algo
+        run: dotnet build src/VectorGold/VectorGold.csproj --configuration Release --no-restore -p:AlgoPublish=false
+      - name: Verify compiled file
+        run: |
+          find src/VectorGold -name '*.algo' -type f -print
+          test -n "$(find src/VectorGold -name '*.algo' -type f -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VECTOR-GOLD-DEMO-cTrader
+          path: src/VectorGold/**/*.algo
+          if-no-files-found: error
+          retention-days: 30
