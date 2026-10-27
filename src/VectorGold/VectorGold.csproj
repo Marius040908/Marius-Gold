@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>VectorGoldDemo</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="cTrader.Automate" Version="1.*" />
+    <PackageReference Include="cTrader.Automate" Version="1.0.21" />
   </ItemGroup>
 </Project>
